@@ -1,0 +1,129 @@
+version: '3.8'
+
+services:
+  # Database
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: mindvpn
+      POSTGRES_USER: mindvpn
+      POSTGRES_PASSWORD: mindvpn_dev
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mindvpn"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Cache & Queue
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # API Backend
+  api:
+    build:
+      context: ../apps/api
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql://mindvpn:mindvpn_dev@postgres:5432/mindvpn
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: dev_secret_key_change_in_production
+      CA_CERT_PATH: /certs/ca.crt
+      SERVER_CERT_PATH: /certs/server.crt
+      SERVER_KEY_PATH: /certs/server.key
+    volumes:
+      - ../certs:/certs:ro
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Celery Worker
+  worker:
+    build:
+      context: ../apps/worker
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql://mindvpn:mindvpn_dev@postgres:5432/mindvpn
+      REDIS_URL: redis://redis:6379/0
+      CA_CERT_PATH: /certs/ca.crt
+      SERVER_CERT_PATH: /certs/server.crt
+      SERVER_KEY_PATH: /certs/server.key
+    volumes:
+      - ../certs:/certs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # UI Frontend
+  ui:
+    build:
+      context: ../apps/ui
+      dockerfile: Dockerfile
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_PUBLIC_BRAND: MindVPN
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+  # Prometheus
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+
+  # Grafana
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+
+volumes:
+  postgres_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:

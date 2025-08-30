@@ -1,0 +1,48 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  # - "first_rules.yml"
+  # - "second_rules.yml"
+
+scrape_configs:
+  # Control Plane API
+  - job_name: 'mindvpn-api'
+    static_configs:
+      - targets: ['api:8000']
+    metrics_path: '/v1/metrics/prometheus'
+    scrape_interval: 10s
+
+  # UI Frontend
+  - job_name: 'mindvpn-ui'
+    static_configs:
+      - targets: ['ui:3000']
+    metrics_path: '/api/metrics'
+    scrape_interval: 30s
+
+  # Mock Agents (for development)
+  - job_name: 'mindvpn-agents'
+    static_configs:
+      - targets: 
+        - 'host.docker.internal:9101'
+        - 'host.docker.internal:9102'
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+  # PostgreSQL
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres:5432']
+    scrape_interval: 30s
+
+  # Redis
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis:6379']
+    scrape_interval: 30s
+
+  # Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
